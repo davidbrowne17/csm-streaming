@@ -191,7 +191,7 @@ torchaudio.save("audio.wav", audio.unsqueeze(0).cpu(), generator.sample_rate)
 
 ### 6. Finetuning
 To finetune CSM all you need are some wav audio files with the speaker voice you want to train, just the raw wavs. Place them in a folder called audio_data and run lora.py.
-You can configure the exact training params such as batch size, number of epochs and learning rate by modifiying the values at the top of lora.py.
+You can configure the exact training params such as batch size, number of epochs and learning rate by modifying the values at the top of lora.py.
 You will need a CUDA gpu with at least 12gb of vram depending on your dataset size and training params.
 
 ## Performance Optimizations
