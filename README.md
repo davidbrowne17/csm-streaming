@@ -37,6 +37,39 @@ huggingface-cli login
 The `triton` package cannot be installed in Windows. Instead use `pip install triton-windows`.
 The realtime demo uses VLLM for inference speed. This is currently not supported for windows but you can try with https://github.com/SystemPanic/vllm-windows until support is added.
 
+### AMD ROCm Setup
+
+Requires: `docker-buildx`
+
+vllm doesn't have binaries for most ROCm setups so you'll need to build it.
+
+```bash
+git clone -b v0.6.6 git@github.com:vllm-project/vllm.git
+# edit Dockerfile.rocm:
+# 1. change `BASE_IMAGE` to `ARG BASE_IMAGE="rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_release_2.3.0"`
+# 2. for `pip install ..` replace pytorch versions with `torch==2.5.1+rocm6.2 torchaudio==2.5.1+rocm6.2 torchvision==0.20.1+rocm6.2`
+# 3. end `pip install ..` command with `--extra-index-url https://download.pytorch.org/whl/rocm6.2;;`
+DOCKER_BUILDKIT=1 docker build --build-arg BUILD_FA="0" -f Dockerfile.rocm -t vllm-rocm .
+```
+
+This requires 100GB and might take up to an hour to build.
+
+Then build an app image that extends from vllm-rocm.
+
+```bash
+docker build -f docker/Dockerfile.csm -t csm-streaming:latest docker
+```
+
+This should build in less than a minute and take 1GB.
+
+Then check `docker/run-csm.sh` to see if it matches your setup, edit if necessary, then run the testscript, it should display audio devices and your AMD cards.
+
+```bash
+docker/run-csm.sh /tmp/test-docker-setup.py
+```
+
+If that works run `docker/run-csm.sh` without arguments to start the system.
+
 ## Quickstart
 
 Generate a sentence with streaming (chunks are processed and output as they're generated):
