@@ -57,7 +57,7 @@ This requires 100GB and might take up to an hour to build.
 Then build an app image that extends from vllm-rocm.
 
 ```bash
-docker build -f docker/Dockerfile.csm -t csm-streaming:latest docker
+docker build -f docker/Dockerfile.rocm -t csm-streaming:latest docker/
 ```
 
 This should build in less than a minute and take 1GB.
