@@ -1,0 +1,24 @@
+FROM vllm-rocm:v0.6.6
+
+WORKDIR /csm
+
+RUN git clone https://github.com/davidbrowne17/csm-streaming.git /csm
+# if building from existing clone instead of above do:
+#COPY . .
+
+RUN sed -i -e 's|^vllm.*|#&|' -e 's|index-url.*|index-url=https://download.pytorch.org/whl/rocm6.2|' requirements.txt; \
+    pip install -r requirements.txt
+
+# keep an eye on https://huggingface.co/docs/bitsandbytes/non_cuda_backends
+ARG GH_BITSANDBYTES=https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_multi-backend-refactor/bitsandbytes-0.45.1.dev0-py3-none-manylinux_2_24_x86_64.whl
+
+RUN pip install --no-deps --force-reinstall "$GH_BITSANDBYTES"; \
+    pip install --force-reinstall pytorch-triton-rocm==3.1.0 --index-url https://download.pytorch.org/whl/nightly/rocm6.2
+
+RUN apt update; apt install -y libportaudio2
+
+COPY test-docker-setup.py /tmp/
+
+EXPOSE 8000
+
+CMD ["python", "main.py"]
