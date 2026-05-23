@@ -1,0 +1,13 @@
+--extra-index-url=https://download.pytorch.org/whl/cu121
+torch==2.6.0
+torchaudio==2.6.0
+tokenizers==0.21.0
+transformers==4.49.0
+huggingface_hub==0.28.1
+moshi==0.2.2
+safetensors
+wandb
+matplotlib
+numpy==1.26.4
+tqdm
+silentcipher @ git+https://github.com/SesameAILabs/silentcipher@master

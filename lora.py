@@ -32,24 +32,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 AUDIO_DIR = "audio_data"
-OUTPUT_DIR = "finetuned_model"
-NUM_EPOCHS = 5
+OUTPUT_DIR = "finetuned_model_run2"
+NUM_EPOCHS = 15
 BATCH_SIZE = 1
 GRADIENT_ACCUMULATION_STEPS = 8
-LEARNING_RATE = 1e-6
+LEARNING_RATE = 1e-4
 MAX_GRAD_NORM = 0.1
 NUM_CYCLES = 1.0
 USE_WANDB = False
 SEED = 42
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MIXED_PRECISION = True
-WARMUP_STEPS = 50
+WARMUP_STEPS = 100
 SPEAKER_ID = 0
 MODEL_NAME = "sesame/csm-1b"
 TRANSCRIPTION_MODEL = "openai/whisper-large-v3-turbo"
 MAX_AUDIO_FILES = 0
-R=32
+R=16
 APLHA=32
+# Path to pre-labelled metadata JSON. When set, bypasses Whisper transcription.
+METADATA_PATH = os.environ.get("CSM_METADATA_PATH")
+if METADATA_PATH is None and os.path.exists("train_merged.json"):
+    METADATA_PATH = "train_merged.json"
 
 class TrainingVisualizer:
     def __init__(self, output_dir):
@@ -887,7 +891,7 @@ def finetune(model, dataset):
     
     num_training_steps = len(dataloader) * NUM_EPOCHS // GRADIENT_ACCUMULATION_STEPS
     lr_scheduler = get_scheduler(
-        "cosine", optimizer=optimizer,
+        "constant_with_warmup", optimizer=optimizer,
         num_warmup_steps=WARMUP_STEPS, num_training_steps=num_training_steps
     )
     
@@ -1074,19 +1078,48 @@ def forward_and_loss(model, bridging_module, batch, device):
     else:
         return torch.tensor(0.0, requires_grad=True, device=device)
 
+def load_from_metadata(metadata_path: str) -> list:
+    """Load pre-labelled audio-text pairs from a JSON metadata file.
+
+    Each record must have: path (str), text (str), speaker (int).
+    Skips missing audio files and logs a warning.
+    """
+    with open(metadata_path) as f:
+        records = json.load(f)
+
+    pairs = []
+    missing = 0
+    for r in records:
+        if not os.path.exists(r["path"]):
+            logger.warning(f"Audio file not found, skipping: {r['path']}")
+            missing += 1
+            continue
+        pairs.append(AudioTextPair(
+            audio_path=r["path"],
+            text=r["text"],
+            speaker_id=int(r["speaker"]),
+        ))
+
+    logger.info(f"Loaded {len(pairs)} samples from {metadata_path} ({missing} skipped)")
+    return pairs
+
+
 def main():
     torch.manual_seed(SEED)
     np.random.seed(SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(SEED)
-    
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     torch.backends.cuda.enable_flash_sdp(True)
     if DEVICE == "cuda":
         torch.backends.cudnn.benchmark = True
-    
+
     model, text_tokenizer, audio_tokenizer = prepare_csm_model_for_training()
-    audio_text_pairs = transcribe_audio_files()
+    if METADATA_PATH:
+        audio_text_pairs = load_from_metadata(METADATA_PATH)
+    else:
+        audio_text_pairs = transcribe_audio_files()
     if not audio_text_pairs:
         logger.error(f"No audio files found or transcribed in {AUDIO_DIR}")
         return
