@@ -1,61 +1,46 @@
-import os
+import argparse
+import json
 import re
-import torch
-from models import Model
-from safetensors.torch import save_file, load_file 
+from pathlib import Path
 
-from lora import (
-    remove_lora_modules,
-    merge_lora_weights,
-    strip_bias_keys,
-    DEVICE,
-    OUTPUT_DIR,
-    replace_linear_with_lora,
-)
-MODEL_NAME = "sesame/csm-1b"
-R=32
-APLHA=32
+import torch
+from safetensors.torch import save_file
+
+from finetuning import load_checkpoint, merge_lora_weights, remove_lora_modules
+from models import Model
+
 
 def find_latest_checkpoint(dir_path):
-    checkpoints = [
-        (int(re.search(r"checkpoint-epoch-(\d+)", d).group(1)), os.path.join(dir_path, d))
-        for d in os.listdir(dir_path)
-        if os.path.isdir(os.path.join(dir_path, d)) and "checkpoint-epoch" in d
-    ]
+    checkpoints = [(int(match.group(1)), path) for path in Path(dir_path).iterdir()
+                   if path.is_dir() and (match := re.fullmatch(r'checkpoint-epoch-(\d+)', path.name))]
     if not checkpoints:
-        raise FileNotFoundError("No checkpoints found.")
-    latest_epoch, latest_path = max(checkpoints, key=lambda x: x[0])
-    print(f"Latest checkpoint: epoch {latest_epoch} -> {latest_path}")
-    return latest_path
+        raise FileNotFoundError(f'No checkpoints found in {dir_path}')
+    return max(checkpoints)[1]
 
-def load_checkpoint_and_merge():
-    print("Loading base model...")
-    model = Model.from_pretrained(MODEL_NAME).to(DEVICE)
 
-    print("Applying LoRA structure to the model...")
-    target_layers = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+def load_checkpoint_and_merge(checkpoint_path=None, output_dir='finetuned_model', device=None):
+    checkpoint_path = Path(checkpoint_path) if checkpoint_path else find_latest_checkpoint(output_dir)
+    config_path = checkpoint_path / 'adapter_config.json'
+    if not config_path.exists():
+        raise ValueError('Checkpoint has no adapter_config.json. Legacy bridge checkpoints cannot be '
+                         'safely merged automatically; retrain with the corrected decoder objective.')
+    config = json.loads(config_path.read_text())
+    device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+    model = Model.from_pretrained(config['base_model']).to(device)
+    load_checkpoint(model, checkpoint_path)
+    model = remove_lora_modules(merge_lora_weights(model))
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    save_file({k: v.detach().contiguous().cpu() for k, v in model.state_dict().items()},
+              str(output / 'model.safetensors'))
+    print(f'Merged model saved to {output / "model.safetensors"}')
+    return model
 
-    model = replace_linear_with_lora(model, r=R, alpha=APLHA, dropout=0.0, target_linear_names = target_layers)
-    checkpoint_path = find_latest_checkpoint(OUTPUT_DIR)
-    
-    print(f"Loading state dictionary from safetensors file...")
-    state_dict = load_file(os.path.join(checkpoint_path, "model.safetensors"), device=DEVICE)
 
-    print("Loading weights into the model...")
-    model.load_state_dict(state_dict, strict=False)
-
-    print("Merging LoRA weights into base model...")
-    merge_lora_weights(model)
-
-    print("Replacing LoRALinear modules with standard nn.Linear...")
-    model = remove_lora_modules(model)
-
-    print("Stripping bias keys for final clean model...")
-    merged_state = strip_bias_keys(model.state_dict())
-
-    final_path = os.path.join(OUTPUT_DIR, "model.safetensors")
-    save_file(merged_state, final_path)
-    print(f"Merged and cleaned model saved to: {final_path}")
-
-if __name__ == "__main__":
-    load_checkpoint_and_merge()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--checkpoint', help='Defaults to the latest checkpoint in --output-dir')
+    parser.add_argument('--output-dir', default='finetuned_model')
+    parser.add_argument('--device', default=None)
+    args = parser.parse_args()
+    load_checkpoint_and_merge(args.checkpoint, args.output_dir, args.device)
